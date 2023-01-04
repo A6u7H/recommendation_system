@@ -1,0 +1,5 @@
+data/ml-20mx16x32/
+experiments/
+
+**/__pycache__
+**/.ipynb_checkpoints
