@@ -11,120 +11,97 @@ from pyspark.mllib.linalg.distributed import MatrixEntry, CoordinateMatrix
 
 from runner import SparkRunner
 
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
-class Processor():
+class RecSysExecuter():
     def __init__(self):
-        """
-        default initialization
-        """
         self.config = configparser.ConfigParser()
         self.config_path = os.path.join("configs", 'config.ini')
         self.config.read(self.config_path)
-        try:
-            self.adapter = SparkRunner()
-            self.sc = self.adapter.get_context()
-            self.spark = self.adapter.get_session()
-        except:
-            logger.error(traceback.format_exc())
 
-        if not self._load_models():
-            raise Exception('Can\'t load models')
+        self.num_recomendation = self.config.getint(
+            "INFERENCE",
+            "num_recomendation"
+        )
+        self.adapter = SparkRunner()
+        self.sc = self.adapter.get_context()
+        self.spark = self.adapter.get_session()
+
+        self._load_models()
         logger.info("Processor is ready")
 
-    def _load_watched(self) -> bool:
+    def _load_watched(self):
         """
         Load watched movie matrix
         """
-        path = self.config.get("MODEL", "WATCHED_PATH")
-        if path is None or not os.path.exists(path):
-            logger.error('Matrix of watched movies doesn\'t exists')
-            return False
+        exp_path = self.config["EXPERIMENTS"]["experiments_path"]
+        watched_path = os.path.join(
+            exp_path,
+            self.config["EXPERIMENTS"]["uimatrix_name"]
+        )
 
-        logger.info(f'Reading {path}')
-        try:
-            matrix = self.spark.read.parquet(path)
-            self.watched = CoordinateMatrix(
-                matrix.rdd.map(lambda row: MatrixEntry(*row))
-            )
-        except:
-            logger.error(traceback.format_exc())
-            return False
-        return True
+        logger.info(f'Reading {watched_path}')
+        matrix = self.spark.read.parquet(watched_path)
+        self.watched = CoordinateMatrix(
+            matrix.rdd.map(lambda row: MatrixEntry(*row))
+        )
 
-    def _load_tf(self) -> bool:
+    def _load_tf(self):
         """
         Load TF model
         """
-        path = self.config.get("MODEL", "TF_PATH")
-        if path is None or not os.path.exists(path):
-            logger.error('TF model doesn\'t exists')
-            return False
+        exp_path = self.config["EXPERIMENTS"]["experiments_path"]
+        tf_path = os.path.join(
+            exp_path,
+            self.config["EXPERIMENTS"]["tf_name"]
+        )
 
-        logger.info(f'Reading {path}')
-        try:
-            self.hashingTF = HashingTF.load(path)
-        except:
-            logger.error(traceback.format_exc())
-            return False
-        return True
+        logger.info(f'Reading {tf_path}')
+        self.hashingTF = HashingTF.load(tf_path)
 
-    def _load_idf(self) -> bool:
+    def _load_idf(self):
         """
         Load IDF model
         """
-        path = self.config.get("MODEL", "IDF_PATH")
-        if path is None or not os.path.exists(path):
-            logger.error('IDF model doesn\'t exists')
-            return False
+        exp_path = self.config["EXPERIMENTS"]["experiments_path"]
+        idf_path = os.path.join(
+            exp_path,
+            self.config["EXPERIMENTS"]["idf_name"]
+        )
 
-        logger.info(f'Reading {path}')
-        try:
-            self.idf = IDFModel.load(path)
-        except:
-            logger.error(traceback.format_exc())
-            return False
-        return True
+        logger.info(f'Reading {idf_path}')
+        self.idf = IDFModel.load(idf_path)
 
-    def _load_idf_features(self) -> bool:
+    def _load_idf_features(self):
         """
         Load TF-IDF features
         """
-        path = self.config.get("MODEL", "IDF_FEATURES_PATH")
-        if path is None or not os.path.exists(path):
-            logger.error('IDF features doesn\'t exists')
-            return False
+        exp_path = self.config["EXPERIMENTS"]["experiments_path"]
+        idf_features_path = os.path.join(
+            exp_path,
+            self.config["EXPERIMENTS"]["idf_features_name"]
+        )
 
-        logger.info(f'Reading {path}')
-        try:
-            self.idf_features = self.spark.read.load(path)
-        except:
-            logger.error(traceback.format_exc())
-            return False
-        return True
+        logger.info(f'Reading {idf_features_path}')
+        self.idf_features = self.spark.read.load(idf_features_path)
 
-    def _load_models(self) -> bool:
+    def _load_models(self):
         """
         Load all models
         """
         logger.info('Loading Matrix of watched movies')
-        if not self._load_watched():
-            return False
+        self._load_watched()
 
         logger.info('Loading TF model')
-        if not self._load_tf():
-            return False
+        self._load_tf()
 
         logger.info('Loading IDF model')
-        if not self._load_idf():
-            return False
+        self._load_idf()
 
         logger.info('Loading IDF features')
-        if not self._load_idf_features():
-            return False
-
-        return True
+        self._load_idf_features()
 
     def _get_recomendation(
         self,
@@ -139,8 +116,12 @@ class Processor():
         """
         logger.info('Calculate movies ranks')
         users_sim_matrix = IndexedRowMatrix(ordered_similarity)
-        multpl = users_sim_matrix.toBlockMatrix().transpose().multiply(self.watched.toBlockMatrix())
-        ranked_movies = multpl.transpose().toIndexedRowMatrix().rows.sortBy(lambda row: row.vector.values[0], ascending=False)
+        multpl = users_sim_matrix.toBlockMatrix().transpose().multiply(
+            self.watched.toBlockMatrix()
+        )
+        ranked_movies = multpl.transpose().toIndexedRowMatrix().rows.sortBy(
+            lambda row: row.vector.values[0], ascending=False
+        )
 
         result = []
         for i, row in enumerate(ranked_movies.collect()):
@@ -150,9 +131,6 @@ class Processor():
         return result
 
     def sample(self):
-        """
-        Выводит рекомендации для случайно выбранного пользователя из датасета
-        """
         logger.info('Sample existing user recomendation')
         temp_matrix = IndexedRowMatrix(self.idf_features.rdd.map(
             lambda row: IndexedRow(row["user_id"], Vectors.dense(row["features"]))
@@ -161,17 +139,22 @@ class Processor():
         logger.info('Calculate similarities')
         similarities = temp_block.transpose().toIndexedRowMatrix().columnSimilarities()
         user_id = np.random.randint(low=0, high=self.watched.numCols())
-        logger.info(f'Random user ID: {user_id}')
-        filtered = similarities.entries.filter(lambda x: x.i == user_id or x.j == user_id)
-        ordered_similarity = filtered.sortBy(lambda x: x.value, ascending=False) \
-            .map(lambda x: IndexedRow(x.j if x.i == user_id else x.i, Vectors.dense(x.value)))
 
+        logger.info(f'Random user ID: {user_id}')
+        filtered = similarities.entries.filter(
+            lambda x: x.i == user_id or x.j == user_id
+        )
+        sorted_filtered = filtered.sortBy(lambda x: x.value, ascending=False)
+        ordered_similarity = sorted_filtered.map(
+            lambda x: IndexedRow(x.j if x.i == user_id else x.i, Vectors.dense(x.value))
+        )
         recomendations = self._get_recomendation(ordered_similarity)
+
         logger.info('TOP recomendations for existing user:')
         for movie_id, rank in recomendations:
             logger.info(f'- movie # {movie_id} (rank: {rank})')
 
 
 if __name__ == "__main__":
-    processor = Processor()
-    processor.sample()
+    recsys = RecSysExecuter()
+    recsys.sample()

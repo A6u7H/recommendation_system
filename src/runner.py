@@ -6,13 +6,14 @@ import configparser
 from pyspark import SparkContext, SparkConf
 from pyspark.sql.session import SparkSession
 
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
 class SparkRunner():
     def __init__(self) -> None:
         self.config = configparser.ConfigParser()
-        self.config_path = os.path.join(os.getcwd(), 'config.ini')
+        self.config_path = os.path.join("./configs", "config.ini")
         self.config.read(self.config_path)
 
         self.spark_config = SparkConf()
@@ -20,12 +21,12 @@ class SparkRunner():
         self.spark_config.set("spark.master", "local")
         self.spark_config.set(
             "spark.executor.cores",
-            self.config.get("SPARK", "NUM_PROCESSORS", fallback="3")
+            self.config["SPARK"]["num_processors"]
         )
 
         self.spark_config.set(
             "spark.executor.instances",
-            self.config.get("SPARK", "NUM_EXECUTORS", fallback="1")
+            self.config["SPARK"]["NUM_EXECUTORS"]
         )
 
         self.spark_config.set("spark.executor.memory", "16g")
@@ -44,14 +45,13 @@ class SparkRunner():
 
         self.num_parts = self.config.getint(
             "SPARK",
-            "NUM_PARTS",
-            fallback=None
+            "NUM_PARTS"
         )
 
         logger.info("Spark config:")
         for conf in self.spark_config.getAll():
-            logger.info(f'{conf[0].upper()} = {conf[1]}')
-        logger.info(f'partitions count: {self.num_parts}')
+            logger.info(f"{conf[0].upper()} = {conf[1]}")
+        logger.info(f"partitions count: {self.num_parts}")
 
         self.sc = None
         self.spark = None
@@ -61,8 +61,7 @@ class SparkRunner():
 
     def get_context(self) -> SparkContext:
         """
-        Возвращает Spark-контекст:
-        Если не инициализирован, то инициализируется и сохраняется в атрибут sc
+        Return spark context
         """
         if self.sc is None:
             try:
@@ -74,8 +73,7 @@ class SparkRunner():
 
     def get_session(self) -> SparkSession:
         """
-        Возвращает Spark-сессию:
-        Если не инициализирована, то инициализируется и сохраняется в атрибут spark
+        Return spark session
         """
         if self.spark is None:
             try:
