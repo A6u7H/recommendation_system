@@ -1,5 +1,4 @@
 import os
-import traceback
 import logging
 import configparser
 import numpy as np
